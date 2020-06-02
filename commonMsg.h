@@ -50,8 +50,6 @@ typedef struct {
 } MSG_STRUCT;
 
 
-osMessageQId getQueueId(MODULE_ID moduleId);
-MSG_STRUCT *allocMemoryPoolMessage();
 void freeMemoryPoolMessage(MSG_STRUCT *p_message);
 
 #endif /* COMMONMSG_H_ */

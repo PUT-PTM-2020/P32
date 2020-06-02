@@ -9,10 +9,10 @@
   * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
   * All rights reserved.</center></h2>
   *
-  * This software component is licensed by ST under Ultimate Liberty license
-  * SLA0044, the "License"; You may not use this file except in compliance with
-  * the License. You may obtain a copy of the License at:
-  *                             www.st.com/SLA0044
+  * This software component is licensed by ST under BSD 3-Clause license,
+  * the "License"; You may not use this file except in compliance with the
+  * License. You may obtain a copy of the License at:
+  *                        opensource.org/licenses/BSD-3-Clause
   *
   ******************************************************************************
   */
@@ -23,13 +23,18 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
-#include "stm32f4xx_hal.h"
+#include "ff.h"
+#include <stdbool.h>
+#include "stdio.h"
+#include "common.h"
+#include "commonMsg.h"
+#include "camera.h"
+#include "stdio.h"
+#include "string.h"
+#include "stdlib.h"
 #include "dwt_stm32_delay.h"
 #include "i2c-lcd.h"
-#include "stdlib.h"
-#include "string.h"
-
+#include "stdio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -39,6 +44,14 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define FA_READ 0x01
+#define FA_WRITE 0x02
+#define FA_OPEN_EXISTING 0x00
+#define FA_CREATE_NEW 0x04
+#define FA_CREATE_ALWAYS 0x08
+#define FA_OPEN_ALWAYS 0x10
+#define FA_OPEN_APPEND 0x30
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -52,9 +65,24 @@ DMA_HandleTypeDef hdma_dcmi;
 
 I2C_HandleTypeDef hi2c1;
 
-UART_HandleTypeDef huart1;
+SPI_HandleTypeDef hspi1;
+
+TIM_HandleTypeDef htim2;
+
+UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
+char buffer[256]; //bufor odczytu i zapisu
+static FATFS FatFs; //uchwyt do urządzenia FatFs (dysku, karty SD...)
+FRESULT fresult; //do przechowywania wyniku operacji na bibliotece
+FIL file; //uchwyt do otwartego pliku
+WORD bytes_written; //liczba zapisanych byte
+WORD bytes_read; //liczba odczytanych byte
+
+//uint8_t sendUART[2] = {65, 'B'};
+//uint16_t sizeSendUART = 2;
+//uint8_t receiveUART[1];
+//uint16_t sizeReceiveUART = 1;
 
 uint32_t time;
 uint32_t time1;
@@ -63,15 +91,48 @@ uint32_t time3;
 uint16_t distance1, distance2, distance3, distance4;
 float medium_speed, speed1, speed2, speed3;
 
-UART_HandleTypeDef * esp_uart = &huart1;
-volatile uint8_t esp_recv_char;
-volatile uint8_t esp_char_counter = 0;
-char esp_pattern[] = "+IPD,";
+volatile int i = 0;
+uint8_t count=0; // do testów printf
+uint8_t  cam_buf[320 * 120 * 2]; // hardcoded frame size było uint 16
 
-volatile uint8_t esp_recv_flag = 0;
-volatile char esp_recv_mux;
-volatile char esp_recv_buffer[1024];
-volatile uint16_t esp_recv_len;
+  UINT bw;
+
+//int j;
+//int k;
+//int Duty_left, Duty_right, dir_left, dir_right;
+
+
+uint8_t sendUART[4] = {'A', 'T','\r','\n'};
+uint16_t sizeSendUART = 4;
+
+uint16_t size_s_mux_1 = 13;
+uint8_t s_mux_1[13] = {'A','T','+','C','I','P','M','U','X','=','1','\r','\n'};
+
+uint16_t size_s_serv_1 = 22;
+uint8_t s_serv_1[22] = {'A','T','+','C','I','P','S','E','R','V','E','R','=','1',',','5','0','1','0','0','\r','\n'};
+
+//uint16_t send_wifi_test_size = 18;
+//uint8_t send_wifi_test[18] = {'A','T','+','C','I','P','S','E','N','D','=','0',',','6','4','0','\r','\n'};
+uint16_t send_wifi_test_size = 4;
+uint8_t send_wifi_test[4] = {'A','T','\r','\n'};
+
+
+uint16_t send_data_size = 6;
+uint8_t send_data[6] = {'t','e','s','t','\r','\n'};
+
+uint16_t send_ent_size = 2;
+uint8_t send_ent[2] = {'\r','\n'};
+
+uint16_t close_wifi_size = 15;
+uint8_t close_wifi[15] = {'A','T','+','C','I','P','C','L','O','S','E','=','0','\r','\n'};
+
+
+uint8_t receiveUART[1];
+uint16_t sizeReceiveUART = 1;
+
+//char packet[100];
+
+int read_bool=0;
 
 /* USER CODE END PV */
 
@@ -81,15 +142,26 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_DCMI_Init(void);
-static void MX_USART1_UART_Init(void);
+static void MX_SPI1_Init(void);
+static void MX_USART3_UART_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
+
+int _write(int file, char *ptr, int len){ // do fprint
+	int i=0;
+	for(i=0; i<len; i++){
+		ITM_SendChar(*ptr++);
+	}
+	return len;
+}
+
+
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-// Funkcja czujnika odległości
 uint32_t Read_HCSR04(){
 	uint32_t local_time = 0;
 
@@ -107,114 +179,33 @@ uint32_t Read_HCSR04(){
 	return local_time;
 }
 
-// Funkcja wysyłająca podany ciąg znaków przez interfejs UART
-void uart_write_line(UART_HandleTypeDef * handler, char * text) {
-	HAL_UART_Transmit(handler, text, strlen(text), 1000);
-	HAL_UART_Transmit(handler, "\r\n", 2, 100);
-}
+//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+//	if(huart->Instance == USART3){
+//		printf("%c", receiveUART[0]);
+//		if(receiveUART[0] == ':'){
+//			read_bool=1;
+//		}
+//
+//		if(receiveUART[0] == ';'){
+//			read_bool=0;
+//			printf("[");
+//			printf("%c", receiveUART[0]);
+//			printf("]");
+//			read_pack(receiveUART[0]);
+//
+//		}
+//
+//		if(read_bool == 1){
+//			printf("[");
+//			printf("%c", receiveUART[0]);
+//			printf("]");
+//			read_pack(receiveUART[0]);
+//		}
+//		HAL_UART_Receive_IT(&huart3, receiveUART, sizeReceiveUART);
+//
+//	}
+//}
 
-
-
-// Funkcja odbierająca linię tekstu przez interfejs UART
-void uart_read_line(UART_HandleTypeDef * handler, char * buffer, uint16_t buffer_size) {
-	HAL_StatusTypeDef status;
-	char current_char;
-	uint16_t char_counter = 0;
-	while (char_counter < buffer_size - 1) {
-	   status = HAL_UART_Receive(handler, &current_char, 1, 1);
-	   if (status == HAL_OK) {
-		   if (current_char == '\r' || current_char == '\n')
-			   if (char_counter == 0) continue;
-			   else break;
-		   *(buffer + char_counter++) = current_char;
-	   }
-	}
-	*(buffer + char_counter) = '\0';
-}
-
-
-
-// Funkcja odczytująca pojedynczy znak odebrany przez UART
-char uart_read_char(UART_HandleTypeDef * handler) {
-	char buffer = '\0';
-	HAL_UART_Receive(handler, &buffer, 1, 1000);
-	return buffer;
-}
-
-// Funkcja wysyłająca polecenie do modułu ESP8266 i oczekująca na jego potwierdzenie
-uint8_t esp_send_cmd(UART_HandleTypeDef * uart, char * command) {
-	char response[30];
-	response[0] = '\0';
-	uart_write_line(uart, command);
-	__HAL_UART_FLUSH_DRREGISTER(&huart1);
-	while (strcmp(response, "OK") != 0 && strcmp(response, "no change") != 0 && strcmp(response, "ERROR") != 0)
-	   uart_read_line(uart, response, 30);
-	if (strcmp(response, "ERROR") == 0) return 0;
-	else return 1;
-}
-
-// Funkcja wysyłająca dane przez nawiązane połączenie TCP i zamykająca to połączenie
-void esp_send_data_and_close(UART_HandleTypeDef * uart, char mux_id, char * content) {
-	char cmd[17];
-	sprintf(cmd, "AT+CIPSEND=%c,%d", mux_id, strlen(content));
-	uart_write_line(uart, cmd);
-	HAL_Delay(20);
-	HAL_UART_Transmit(uart, content, strlen(content), 5000);
-	HAL_Delay(100);
-	sprintf(cmd, "AT+CIPCLOSE=%c", esp_recv_mux);
-	uart_write_line(esp_uart, cmd);
-}
-
-// Funkcja uruchamiająca obsługę przerwań
-void esp_start_int_recv(UART_HandleTypeDef * uart) {
-	__HAL_UART_FLUSH_DRREGISTER(uart);
-	HAL_UART_Receive_IT(uart, &esp_recv_char, 1);
-}
-
-// Funkcja obsługująca przerwanie, wywoływana w momencie odebrania przez interfejs UART pojedynczego bajtu danych
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef * uart) {
-	if (esp_recv_char == esp_pattern[esp_char_counter]) {
-	   esp_char_counter++;
-	   if (esp_char_counter == 5) {
-		   // Jeśli odbierzemy ciąg znaków "+IPD,":
-
-		   // Odczytujemy numer połączenia do zmiennej esp_recv_mux
-		   esp_recv_mux = uart_read_char(uart);
-		   uart_read_char(uart);
-
-		   // Odczytujemy długość odebranych dancyh do esp_recv_len
-		   char length_str[5];
-		   char current_char = 0;
-		   uint8_t char_counter = 0;
-		   do {
-			   current_char = uart_read_char(uart);
-			   length_str[char_counter++] = current_char;
-		   } while (current_char != ':');
-		   length_str[char_counter] = '\0';
-		   uint16_t esp_recv_len = atoi(&length_str);
-
-		   // Odbieramy dane do bufora esp_recv_buffer
-		   HAL_UART_Receive(uart, esp_recv_buffer, esp_recv_len, 1000);
-		   esp_recv_flag = 1;
-		   return;
-	   }
-	} else esp_char_counter = 0;
-
-	// Ponowne uruchomienie przerwania
-	HAL_UART_Receive_IT(uart, &esp_recv_char, 1);
-}
-
-// Funkcja przesyłająca do modułu ESP8266 polecenia konfigurujące
-uint8_t esp_setup() {
-	HAL_Delay(500); // Oczekujemy na uruchomienie modułu
-
-	if (!esp_send_cmd(esp_uart, "AT+CWMODE=1")) return 0;
-	if (!esp_send_cmd(esp_uart, "AT+CWJAP=\"NAZWA_SIECI\",\"KLUCZ_SIECIOWY\"")) return 0;
-	if (!esp_send_cmd(esp_uart, "AT+CIPMUX=1")) return 0;
-	if (!esp_send_cmd(esp_uart, "AT+CIPSERVER=1,80")) return 0;
-	return 1;
-
-}
 
 /* USER CODE END 0 */
 
@@ -225,9 +216,6 @@ uint8_t esp_setup() {
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
-	// Forbot
-	SystemCoreClock = 8000000; // taktowanie 8Mhz
 
   /* USER CODE END 1 */
 
@@ -252,101 +240,198 @@ int main(void)
   MX_DMA_Init();
   MX_I2C1_Init();
   MX_DCMI_Init();
-  MX_USART1_UART_Init();
+  MX_SPI1_Init();
+  MX_USART3_UART_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   DWT_Delay_Init();
 
-  // Z Forbota
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  	 __HAL_RCC_GPIOB_CLK_ENABLE();
-  	 __HAL_RCC_GPIOC_CLK_ENABLE();
-  	 __HAL_RCC_I2C1_CLK_ENABLE();
+  printf("CONSOLE GOOD \n");
 
-  	 GPIO_InitTypeDef gpio;
-  	 gpio.Mode = GPIO_MODE_AF_OD;
-  	 gpio.Pin = GPIO_PIN_8 | GPIO_PIN_9; // SCL, SDA
-  	 gpio.Pull = GPIO_PULLUP;
-  	 gpio.Speed = GPIO_SPEED_FREQ_LOW;
-  	 HAL_GPIO_Init(GPIOB, &gpio);
 
-  	 hi2c1.Instance             = I2C1;
-  	hi2c1.Init.ClockSpeed      = 100000;
-  	hi2c1.Init.DutyCycle       = I2C_DUTYCYCLE_2;
-  	hi2c1.Init.OwnAddress1     = 0xff;
-  	hi2c1.Init.AddressingMode  = I2C_ADDRESSINGMODE_7BIT;
-  	hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  	hi2c1.Init.OwnAddress2     = 0xff;
-  	hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  	hi2c1.Init.NoStretchMode   = I2C_NOSTRETCH_DISABLE;
+  HAL_UART_Transmit_IT(&huart3, send_wifi_test, send_wifi_test_size);
+  HAL_Delay(1000);
+//  HAL_UART_Transmit_IT(&huart3, send_data, send_data_size);
+//  HAL_Delay(1000);
 
-  	 HAL_I2C_Init(&hi2c1);
 
-  	 uint8_t test = 0x5a;
-  	 HAL_I2C_Mem_Write(&hi2c1, 0xa0, 0x10, 1, (uint8_t*)&test, sizeof(test), HAL_MAX_DELAY);
 
-  	 uint8_t result = 0;
-  	 HAL_I2C_Mem_Read(&hi2c1, 0xa0, 0x10, 1, (uint8_t*)&result, sizeof(result), HAL_MAX_DELAY);
+  //ITM_SendChar( 65 );
+//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
+//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET);
+//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
+//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_RESET);
+//
+//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_SET);
+//  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_SET);
+//
+//
+//  HAL_TIM_Base_Start_IT(&htim2);
+//  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
+//  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
 
+
+  //set wifi end leds
+//  HAL_UART_Receive_IT(&huart3, receiveUART, sizeReceiveUART);
+//
+//   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_SET);
+//   HAL_UART_Transmit_IT(&huart3, sendUART, sizeSendUART);
+//   HAL_Delay(6000);
+//   HAL_UART_Transmit_IT(&huart3, s_mux_1, size_s_mux_1);
+//   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_8, GPIO_PIN_SET);
+//   HAL_Delay(6000);
+//   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_9, GPIO_PIN_SET);
+//   HAL_UART_Transmit_IT(&huart3, s_serv_1, size_s_serv_1);
+//   HAL_Delay(6000);
+//   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
+
+
+//  zapis na kartę pliku tekstowego
+//  fresult = f_mount(&FatFs, "", 0);
+//  fresult = f_open(&file, "write.txt", FA_OPEN_ALWAYS | FA_WRITE);
+//  int len = sprintf( buffer, "Hello PTM!\r\n");
+//  fresult = f_write(&file, buffer, len, &bw);
+//  fresult = f_close (&file);
+
+
+
+  if (camera_init() == RET_OK)
+  {
+	  if (camera_config(CAMERA_MODE_QVGA_RGB565) == RET_OK)
+	  {
+		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET); // init OK
+	  }
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
   while (1)
   {
-    /* USER CODE END WHILE */
+	  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
+	  time = Read_HCSR04();
+	  distance1 = time / 58;
+	  HAL_Delay(1000);
+	  time1+=1+time/1000000;
+	  time = Read_HCSR04();
+	  distance2 = time / 58;
+	  time1+=time/1000000;
+	  speed1=(distance1-distance2)/time1;
+	  HAL_Delay(1000);
+	  time2+=1+time/1000000;
+	  time = Read_HCSR04();
+	  distance3 = time / 58;
+	  time2+=time/1000000;
+	  speed2=(distance2-distance3)/time2;
+	  HAL_Delay(1000);
+	  time3+=1+time/1000000;
+	  time = Read_HCSR04();
+	  distance4 = time / 58;
+	  time3+=time/1000000;
+	  speed3=(distance3-distance4)/time3;
+	  medium_speed=(speed1+speed2+speed3)/3;
+	  if(medium_speed>10){
+		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);
+		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_RESET);
+
+		  if (camera_startCap(CAMERA_CAP_SINGLE_FRAME, (uint32_t)cam_buf)  == RET_OK)
+		  {
+			  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
+			  camera_stopCap();
+			  f_mount(&FatFs, "", 0);
+			  f_open(&file, "image.raw", FA_OPEN_ALWAYS | FA_CREATE_ALWAYS | FA_WRITE);
+			  HAL_Delay(5);
+//			  HAL_UART_Transmit_IT(&huart3, send_data, send_data_size);
+			  HAL_Delay(5);
+
+			  for (int i = 0; i < 320 * 120 * 2; i += 2)
+			  {
+				  f_write(&file, &cam_buf[i], 2, &bw);
+				  HAL_UART_Transmit_IT(&huart3, &cam_buf[i], 2);
+			  }
+			  fresult = f_close (&file);
+			  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET); // captured
+			  HAL_Delay(2000);
+		  } else {
+			  printf("not good");
+		  }
+	  }
+	  time1=0;
+	  time2=0;
+	  time3=0;
+	  HAL_Delay(200);
+//	  HAL_UART_Transmit_IT(&huart3, send_wifi_test, send_wifi_test_size);
+//	    HAL_Delay(1000);
+
+//	  if (camera_startCap(CAMERA_CAP_SINGLE_FRAME, (uint32_t)cam_buf)  == RET_OK)
+//	  {
+//		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
+//		  camera_stopCap();
+//		  f_mount(&FatFs, "", 0);
+//		  f_open(&file, "image1.raw", FA_OPEN_ALWAYS | FA_CREATE_ALWAYS | FA_WRITE);
+//		  HAL_Delay(5);
+////			  HAL_UART_Transmit_IT(&huart3, send_data, send_data_size);
+//		  HAL_Delay(5);
+//
+//		  for (int i = 0; i < 320 * 120 * 2; i += 2)
+//		  {
+//			  f_write(&file, &cam_buf[i], 2, &bw);
+//			  HAL_UART_Transmit_IT(&huart3, &cam_buf[i], 2);
+//		  }
+//		  fresult = f_close (&file);
+//		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET); // captured
+//		  HAL_Delay(2000);
+//	  } else {
+//		  printf("not good");
+//	  }
+//
+//	  if (camera_startCap(CAMERA_CAP_SINGLE_FRAME, (uint32_t)cam_buf)  == RET_OK)
+//	  {
+//		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
+//		  camera_stopCap();
+//		  f_mount(&FatFs, "", 0);
+//		  f_open(&file, "image2.raw", FA_OPEN_ALWAYS | FA_CREATE_ALWAYS | FA_WRITE);
+//		  HAL_Delay(5);
+////			  HAL_UART_Transmit_IT(&huart3, send_data, send_data_size);
+//		  HAL_Delay(5);
+//
+//		  for (int i = 0; i < 320 * 120 * 2; i += 2)
+//		  {
+//			  f_write(&file, &cam_buf[i], 2, &bw);
+//			  HAL_UART_Transmit_IT(&huart3, &cam_buf[i], 2);
+//		  }
+//		  fresult = f_close (&file);
+//		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET); // captured
+//		  HAL_Delay(2000);
+//	  } else {
+//		  printf("not good");
+//	  }
+//
+//	  if (camera_startCap(CAMERA_CAP_SINGLE_FRAME, (uint32_t)cam_buf)  == RET_OK)
+//	  {
+//		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
+//		  camera_stopCap();
+//		  f_mount(&FatFs, "", 0);
+//		  f_open(&file, "image3.raw", FA_OPEN_ALWAYS | FA_CREATE_ALWAYS | FA_WRITE);
+//		  HAL_Delay(5);
+////			  HAL_UART_Transmit_IT(&huart3, send_data, send_data_size);
+//		  HAL_Delay(5);
+//
+//		  for (int i = 0; i < 320 * 120 * 2; i += 2)
+//		  {
+//			  f_write(&file, &cam_buf[i], 2, &bw);
+//			  HAL_UART_Transmit_IT(&huart3, &cam_buf[i], 2);
+//		  }
+//		  fresult = f_close (&file);
+//		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET); // captured
+//		  HAL_Delay(2000);
+//	  } else {
+//		  printf("not good");
+//	  }
+//    /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-	  // Działa
-//	  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
-//	  time = Read_HCSR04();
-//	  distance1 = time / 58;
-//	  HAL_Delay(1000);
-//	  time1+=1+time/1000000;
-//	  time = Read_HCSR04();
-//	  distance2 = time / 58;
-//	  time1+=time/1000000;
-//	  speed1=(distance1-distance2)/time1;
-//	  	  HAL_Delay(1000);
-//	  	  time2+=1+time/1000000;
-//	  	  time = Read_HCSR04();
-//	  	  distance3 = time / 58;
-//	  	  time2+=time/1000000;
-//	  	  speed2=(distance2-distance3)/time2;
-//	  		  HAL_Delay(1000);
-//	  		  time3+=1+time/1000000;
-//	  		  time = Read_HCSR04();
-//	  		  distance4 = time / 58;
-//	  		  time3+=time/1000000;
-//	  		  speed3=(distance3-distance4)/time3;
-//	  		  medium_speed=(speed1+speed2+speed3)/3;
-//	  if(medium_speed>10){
-//		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);
-//		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_RESET);
-//	  }
-//	  time1=0;
-//	  time2=0;
-//	  time3=0;
-//	  HAL_Delay(200);
-	  // Koniec działania
-
-//	  	  if(distance > 6 && distance < 12){
-//	  		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);
-//	  		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_RESET);
-//	  	  }
-//	  	  else if(distance > 12 && distance < 18){
-//	  		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12 | GPIO_PIN_13, GPIO_PIN_SET);
-//	  		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_RESET);
-//	  	  }
-//	  	  else if(distance > 18 && distance < 24){
-//	  		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14, GPIO_PIN_SET);
-//	  		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_RESET);
-//	  	  }
-//	  	  else if(distance > 24){
-//	  		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_SET);
-//	  	  }
-//	  	  else HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_RESET);
-//	  	  HAL_Delay(200);
   }
   /* USER CODE END 3 */
 }
@@ -372,10 +457,10 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 336;
+  RCC_OscInitStruct.PLL.PLLM = 4;
+  RCC_OscInitStruct.PLL.PLLN = 168;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 7;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -418,7 +503,7 @@ static void MX_DCMI_Init(void)
   hdcmi.Init.HSPolarity = DCMI_HSPOLARITY_LOW;
   hdcmi.Init.CaptureRate = DCMI_CR_ALL_FRAME;
   hdcmi.Init.ExtendedDataMode = DCMI_EXTEND_DATA_8B;
-  hdcmi.Init.JPEGMode = DCMI_JPEG_ENABLE;
+  hdcmi.Init.JPEGMode = DCMI_JPEG_DISABLE;
   if (HAL_DCMI_Init(&hdcmi) != HAL_OK)
   {
     Error_Handler();
@@ -464,35 +549,136 @@ static void MX_I2C1_Init(void)
 }
 
 /**
-  * @brief USART1 Initialization Function
+  * @brief SPI1 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_USART1_UART_Init(void)
+static void MX_SPI1_Init(void)
 {
 
-  /* USER CODE BEGIN USART1_Init 0 */
+  /* USER CODE BEGIN SPI1_Init 0 */
 
-  /* USER CODE END USART1_Init 0 */
+  /* USER CODE END SPI1_Init 0 */
 
-  /* USER CODE BEGIN USART1_Init 1 */
+  /* USER CODE BEGIN SPI1_Init 1 */
 
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
+  /* USER CODE END SPI1_Init 1 */
+  /* SPI1 parameter configuration*/
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN USART1_Init 2 */
+  /* USER CODE BEGIN SPI1_Init 2 */
 
-  /* USER CODE END USART1_Init 2 */
+  /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 4999;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 99;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART3_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART3_Init 0 */
+
+  /* USER CODE END USART3_Init 0 */
+
+  /* USER CODE BEGIN USART3_Init 1 */
+
+  /* USER CODE END USART3_Init 1 */
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 115200;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART3_Init 2 */
+
+  /* USER CODE END USART3_Init 2 */
 
 }
 
@@ -525,21 +711,22 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_15, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11 
+                          |GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_15, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : PA1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  /*Configure GPIO pins : PA1 PA9 PA10 PA15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -551,8 +738,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PD12 PD13 PD14 PD15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+  /*Configure GPIO pins : PD8 PD9 PD10 PD11 
+                           PD12 PD13 PD14 PD15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11 
+                          |GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -565,13 +754,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF0_MCO;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PB3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_3;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 }
 
