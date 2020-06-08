@@ -35,6 +35,7 @@
 #include "dwt_stm32_delay.h"
 #include "i2c-lcd.h"
 #include "stdio.h"
+#include "math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -69,6 +70,7 @@ SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim2;
 
+UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
@@ -79,46 +81,74 @@ FIL file; //uchwyt do otwartego pliku
 WORD bytes_written; //liczba zapisanych byte
 WORD bytes_read; //liczba odczytanych byte
 
-//uint8_t sendUART[2] = {65, 'B'};
-//uint16_t sizeSendUART = 2;
-//uint8_t receiveUART[1];
-//uint16_t sizeReceiveUART = 1;
-
 uint32_t time;
 uint32_t time1;
 uint32_t time2;
 uint32_t time3;
 uint16_t distance1, distance2, distance3, distance4;
 float medium_speed, speed1, speed2, speed3;
+float allowed_speed = 30;
 
 volatile int i = 0;
 uint8_t count=0; // do testów printf
 uint8_t  cam_buf[320 * 120 * 2]; // hardcoded frame size było uint 16
 
-  UINT bw;
+UINT bw;
 
 //int j;
 //int k;
 //int Duty_left, Duty_right, dir_left, dir_right;
 
-
 uint8_t sendUART[4] = {'A', 'T','\r','\n'};
 uint16_t sizeSendUART = 4;
 
-uint16_t size_s_mux_1 = 13;
-uint8_t s_mux_1[13] = {'A','T','+','C','I','P','M','U','X','=','1','\r','\n'};
+uint16_t size_s_mux_0 = 8;
+uint8_t s_mux_0[8] = {'A','T','+','R','S','T','\r','\n'};
 
-uint16_t size_s_serv_1 = 22;
-uint8_t s_serv_1[22] = {'A','T','+','C','I','P','S','E','R','V','E','R','=','1',',','5','0','1','0','0','\r','\n'};
+uint16_t size_s_mux_1 = 13;
+uint8_t s_mux_1[13] = {'A','T','+','C','W','M','O','D','E','=','2','\r','\n'};
+
+uint16_t size_s_mux_2 = 14;
+uint8_t s_mux_2[14] = {'A','T','+','C','I','P','M','O','D','E','=','0','\r','\n'};
+
+uint16_t size_s_mux_3 = 13;
+uint8_t s_mux_3[13] = {'A','T','+','C','I','P','M','U','X','=','1','\r','\n'};
+
+uint16_t size_s_mux_4 = 21;
+uint8_t s_mux_4[21] = {'A','T','+','C','I','P','S','E','R','V','E','R','=','1',',','5','2','0','0','\r','\n'};
+
+uint16_t size_s_mux_5 = 37;
+uint8_t s_mux_5[37] = {'A','T','+','C','W','S','A','P','=','"','S','T','M','3','2','"',',','"','S','T','M','3','2','D','Z','I','A','L','A','J','"',',','4',',','3','\r','\n'};
+
+//uint16_t size_s_serv_1 = 21;
+//uint8_t s_serv_1[22] = {'A','T','+','C','I','P','S','E,'R','V','E','R','=','1',',','5','2','0','0','\r','\n'};
 
 //uint16_t send_wifi_test_size = 18;
 //uint8_t send_wifi_test[18] = {'A','T','+','C','I','P','S','E','N','D','=','0',',','6','4','0','\r','\n'};
+//uint16_t send_wifi_test_size = 4;
+//uint8_t send_wifi_test[4] = {'A','T','\r','\n'};
+
+uint16_t send_wifi_size_size_size = 16;
+uint8_t send_wifi_size_size[16] = {'A','T','+','C','I','P','S','E','N','D','=','0',',','5','\r','\n'};
+
+uint16_t size_size_size = 7;
+uint8_t size_size[7] = {'7','6','8','0','0','\r','\n'};
+
+uint16_t send_wifi_size = 18;
+uint8_t send_wifi[18] = {'A','T','+','C','I','P','S','E','N','D','=','0',',','3','2','0','\r','\n'};
+
+uint16_t send_id_size = 16;
+uint8_t send_id[16] = {'A','T','+','C','I','P','S','E','N','D','=','0',',','3','\r','\n'};
+//uint8_t send_wifi[18] = {'A','T','+','C','I','P','S','E','N','D','=','0',',','3','2','2','\r','\n'};
+
+uint16_t send_wifit_size = 16;
+uint8_t send_wifit[16] = {'A','T','+','C','I','P','S','E','N','D','=','0',',','4','\r','\n'};
+
 uint16_t send_wifi_test_size = 4;
-uint8_t send_wifi_test[4] = {'A','T','\r','\n'};
+uint8_t send_wifi_test[4] = {'T','E','S','T'};
 
-
-uint16_t send_data_size = 6;
-uint8_t send_data[6] = {'t','e','s','t','\r','\n'};
+uint16_t send_data_size = 320;
+uint8_t send_data[320] = {};
 
 uint16_t send_ent_size = 2;
 uint8_t send_ent[2] = {'\r','\n'};
@@ -127,13 +157,23 @@ uint16_t close_wifi_size = 15;
 uint8_t close_wifi[15] = {'A','T','+','C','I','P','C','L','O','S','E','=','0','\r','\n'};
 
 
-uint8_t receiveUART[1];
-uint16_t sizeReceiveUART = 1;
+uint8_t receiveUART[12];
+uint16_t sizeReceiveUART = 12;
+uint8_t receiveUART_speed[2];
+uint16_t sizeReceiveUART_speed = 2;
 
 //char packet[100];
+//uint16_t bufr_size=322;
+//uint8_t bufr[322]={};
+uint16_t bufr_size=320*120;
+char bufr[320*120]={};
 
 int read_bool=0;
-
+int id=1;
+char name[10]="image0.raw";
+char idc[3]={};
+char image_size[5]="76800";
+int send_speed;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -145,6 +185,7 @@ static void MX_DCMI_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 int _write(int file, char *ptr, int len){ // do fprint
@@ -179,33 +220,19 @@ uint32_t Read_HCSR04(){
 	return local_time;
 }
 
-//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-//	if(huart->Instance == USART3){
-//		printf("%c", receiveUART[0]);
-//		if(receiveUART[0] == ':'){
-//			read_bool=1;
-//		}
-//
-//		if(receiveUART[0] == ';'){
-//			read_bool=0;
-//			printf("[");
-//			printf("%c", receiveUART[0]);
-//			printf("]");
-//			read_pack(receiveUART[0]);
-//
-//		}
-//
-//		if(read_bool == 1){
-//			printf("[");
-//			printf("%c", receiveUART[0]);
-//			printf("]");
-//			read_pack(receiveUART[0]);
-//		}
-//		HAL_UART_Receive_IT(&huart3, receiveUART, sizeReceiveUART);
-//
-//	}
-//}
+char checkc[3]="cfg";
 
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+	if(huart->Instance == USART3){
+		printf("%c", receiveUART[0]);
+			if(strstr(receiveUART, checkc)!=NULL){
+				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_SET);
+				HAL_Delay(2000);
+				HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_RESET);
+			}
+		HAL_UART_Receive_IT(&huart3, receiveUART, sizeReceiveUART);
+	}
+}
 
 /* USER CODE END 0 */
 
@@ -243,14 +270,15 @@ int main(void)
   MX_SPI1_Init();
   MX_USART3_UART_Init();
   MX_TIM2_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   DWT_Delay_Init();
 
   printf("CONSOLE GOOD \n");
 
 
-  HAL_UART_Transmit_IT(&huart3, send_wifi_test, send_wifi_test_size);
-  HAL_Delay(1000);
+//  HAL_UART_Transmit_IT(&huart3, send_wifi_test, send_wifi_test_size);
+//  HAL_Delay(1000);
 //  HAL_UART_Transmit_IT(&huart3, send_data, send_data_size);
 //  HAL_Delay(1000);
 
@@ -293,6 +321,20 @@ int main(void)
 //  fresult = f_write(&file, buffer, len, &bw);
 //  fresult = f_close (&file);
 
+//  HAL_UART_Receive_IT(&huart3, receiveUART, sizeReceiveUART);
+     HAL_UART_Transmit_IT(&huart3, sendUART, sizeSendUART);
+     HAL_Delay(50);
+     HAL_UART_Transmit_IT(&huart3, s_mux_1, size_s_mux_1);
+     HAL_Delay(50);
+     HAL_UART_Transmit_IT(&huart3, s_mux_2, size_s_mux_2);
+     HAL_Delay(50);
+     HAL_UART_Transmit_IT(&huart3, s_mux_3, size_s_mux_3);
+     HAL_Delay(50);
+     HAL_UART_Transmit_IT(&huart3, s_mux_4, size_s_mux_4);
+     HAL_Delay(50);
+     HAL_UART_Transmit_IT(&huart3, s_mux_5, size_s_mux_5);
+     HAL_Delay(50);
+
 
 
   if (camera_init() == RET_OK)
@@ -312,46 +354,92 @@ int main(void)
 	  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
 	  time = Read_HCSR04();
 	  distance1 = time / 58;
+	  while(distance1>200){
+		  time=Read_HCSR04();
+		  distance1=time/58;
+	  }
 	  HAL_Delay(1000);
 	  time1+=1+time/1000000;
 	  time = Read_HCSR04();
 	  distance2 = time / 58;
+	  while(distance2>200){
+		  time=Read_HCSR04();
+		  distance2=time/58;
+	  }
 	  time1+=time/1000000;
 	  speed1=(distance1-distance2)/time1;
+	  if(speed1<0) speed1=-speed1;
 	  HAL_Delay(1000);
 	  time2+=1+time/1000000;
 	  time = Read_HCSR04();
 	  distance3 = time / 58;
+	  while(distance3>200){
+	  		  time=Read_HCSR04();
+	  		  distance3=time/58;
+	  }
 	  time2+=time/1000000;
 	  speed2=(distance2-distance3)/time2;
+	  if(speed2<0) speed2=-speed2;
 	  HAL_Delay(1000);
 	  time3+=1+time/1000000;
 	  time = Read_HCSR04();
 	  distance4 = time / 58;
+	  while(distance4>200){
+		  time=Read_HCSR04();
+		  distance4=time/58;
+	  }
 	  time3+=time/1000000;
 	  speed3=(distance3-distance4)/time3;
+	  if(speed3<0) speed3=-speed3;
 	  medium_speed=(speed1+speed2+speed3)/3;
-	  if(medium_speed>10){
+	  if(medium_speed>allowed_speed){
 		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);
 		  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_RESET);
 
 		  if (camera_startCap(CAMERA_CAP_SINGLE_FRAME, (uint32_t)cam_buf)  == RET_OK)
 		  {
+			  name[5]=name[5]+1;
+			  send_speed=round(medium_speed);
 			  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
 			  camera_stopCap();
 			  f_mount(&FatFs, "", 0);
-			  f_open(&file, "image.raw", FA_OPEN_ALWAYS | FA_CREATE_ALWAYS | FA_WRITE);
+			  f_open(&file, name, FA_OPEN_ALWAYS | FA_CREATE_ALWAYS | FA_WRITE);
 			  HAL_Delay(5);
-//			  HAL_UART_Transmit_IT(&huart3, send_data, send_data_size);
-			  HAL_Delay(5);
-
 			  for (int i = 0; i < 320 * 120 * 2; i += 2)
 			  {
 				  f_write(&file, &cam_buf[i], 2, &bw);
-				  HAL_UART_Transmit_IT(&huart3, &cam_buf[i], 2);
+			  }
+			  int y=0;
+			  for(int z=0;z<320*120*2;z++){
+				  bufr[z]=cam_buf[z];
 			  }
 			  fresult = f_close (&file);
 			  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET); // captured
+			  HAL_Delay(400);
+			  HAL_UART_Transmit_IT(&huart3, send_id, send_id_size);
+			  HAL_Delay(400);
+			  send_speed=send_speed+id*100;
+			  HAL_Delay(400);
+			  sprintf(idc,"%d",send_speed);
+			  HAL_Delay(400);
+			  HAL_UART_Transmit_IT(&huart3, idc, 3);
+			  HAL_Delay(4000);
+			  HAL_UART_Transmit_IT(&huart3, send_wifi_size_size, send_wifi_size_size_size);
+			  HAL_Delay(400);
+			  HAL_UART_Transmit_IT(&huart3, image_size, 5);
+			  HAL_Delay(400);
+			  int n=0;
+			  char bufor[320]={};
+			  for(int j=0;j<120*2;j++){
+				 for(int k=0;k<320;k++){
+					 bufor[k]=bufr[k+n];
+				 }
+				 HAL_UART_Transmit_IT(&huart3,send_wifi, send_wifi_size);
+				 HAL_Delay(2000);
+				 HAL_UART_Transmit_IT(&huart3, bufor, 320);
+				 HAL_Delay(2000);
+				 n+=320;
+			  }
 			  HAL_Delay(2000);
 		  } else {
 			  printf("not good");
@@ -361,8 +449,6 @@ int main(void)
 	  time2=0;
 	  time3=0;
 	  HAL_Delay(200);
-//	  HAL_UART_Transmit_IT(&huart3, send_wifi_test, send_wifi_test_size);
-//	    HAL_Delay(1000);
 
 //	  if (camera_startCap(CAMERA_CAP_SINGLE_FRAME, (uint32_t)cam_buf)  == RET_OK)
 //	  {
@@ -429,7 +515,7 @@ int main(void)
 //	  } else {
 //		  printf("not good");
 //	  }
-//    /* USER CODE END WHILE */
+    /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
@@ -646,6 +732,39 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 2 */
   HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
 
 }
 
