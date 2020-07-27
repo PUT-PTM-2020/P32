@@ -1,0 +1,1 @@
+Komunikacja: https://github.com/ElStempel/Client-Fotoradar?fbclid=IwAR0MtRjnkhEGIz4VxxO6jgtqNfM3vEqWkyfkJkiyKUIr20GiINEAkoYYNL4
