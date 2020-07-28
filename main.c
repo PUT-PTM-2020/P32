@@ -95,10 +95,6 @@ uint8_t  cam_buf[320 * 120 * 2]; // hardcoded frame size było uint 16
 
 UINT bw;
 
-//int j;
-//int k;
-//int Duty_left, Duty_right, dir_left, dir_right;
-
 uint8_t sendUART[4] = {'A', 'T','\r','\n'};
 uint16_t sizeSendUART = 4;
 
@@ -119,14 +115,6 @@ uint8_t s_mux_4[21] = {'A','T','+','C','I','P','S','E','R','V','E','R','=','1','
 
 uint16_t size_s_mux_5 = 37;
 uint8_t s_mux_5[37] = {'A','T','+','C','W','S','A','P','=','"','S','T','M','3','2','"',',','"','S','T','M','3','2','D','Z','I','A','L','A','J','"',',','4',',','3','\r','\n'};
-
-//uint16_t size_s_serv_1 = 21;
-//uint8_t s_serv_1[22] = {'A','T','+','C','I','P','S','E,'R','V','E','R','=','1',',','5','2','0','0','\r','\n'};
-
-//uint16_t send_wifi_test_size = 18;
-//uint8_t send_wifi_test[18] = {'A','T','+','C','I','P','S','E','N','D','=','0',',','6','4','0','\r','\n'};
-//uint16_t send_wifi_test_size = 4;
-//uint8_t send_wifi_test[4] = {'A','T','\r','\n'};
 
 uint16_t send_wifi_size_size_size = 16;
 uint8_t send_wifi_size_size[16] = {'A','T','+','C','I','P','S','E','N','D','=','0',',','5','\r','\n'};
@@ -275,51 +263,6 @@ int main(void)
   DWT_Delay_Init();
 
   printf("CONSOLE GOOD \n");
-
-
-//  HAL_UART_Transmit_IT(&huart3, send_wifi_test, send_wifi_test_size);
-//  HAL_Delay(1000);
-//  HAL_UART_Transmit_IT(&huart3, send_data, send_data_size);
-//  HAL_Delay(1000);
-
-
-
-  //ITM_SendChar( 65 );
-//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
-//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET);
-//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_RESET);
-//
-//  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_SET);
-//  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_SET);
-//
-//
-//  HAL_TIM_Base_Start_IT(&htim2);
-//  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
-//  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
-
-
-  //set wifi end leds
-//  HAL_UART_Receive_IT(&huart3, receiveUART, sizeReceiveUART);
-//
-//   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_SET);
-//   HAL_UART_Transmit_IT(&huart3, sendUART, sizeSendUART);
-//   HAL_Delay(6000);
-//   HAL_UART_Transmit_IT(&huart3, s_mux_1, size_s_mux_1);
-//   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_8, GPIO_PIN_SET);
-//   HAL_Delay(6000);
-//   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_9, GPIO_PIN_SET);
-//   HAL_UART_Transmit_IT(&huart3, s_serv_1, size_s_serv_1);
-//   HAL_Delay(6000);
-//   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
-
-
-//  zapis na kartę pliku tekstowego
-//  fresult = f_mount(&FatFs, "", 0);
-//  fresult = f_open(&file, "write.txt", FA_OPEN_ALWAYS | FA_WRITE);
-//  int len = sprintf( buffer, "Hello PTM!\r\n");
-//  fresult = f_write(&file, buffer, len, &bw);
-//  fresult = f_close (&file);
 
 //  HAL_UART_Receive_IT(&huart3, receiveUART, sizeReceiveUART);
      HAL_UART_Transmit_IT(&huart3, sendUART, sizeSendUART);
